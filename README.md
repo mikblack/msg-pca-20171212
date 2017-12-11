@@ -1,7 +1,8 @@
 ## PCA, SVD and MDS - dimension reduction tools (part 2)
 
 Rendered html version of R markdown handout can be viewed at:
- - https://rawgit.com/mikblack/msg-pca-20171212/master/study_group-dimension_reduction-20171212.html
+
+https://rawgit.com/mikblack/msg-pca-20171212/master/study_group-dimension_reduction-20171212.html
 
 This material follows on from our earlier Study Group session:
 
