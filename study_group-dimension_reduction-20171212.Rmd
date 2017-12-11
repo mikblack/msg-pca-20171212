@@ -1,0 +1,341 @@
+---
+title: 'Otago Study Group: PCA, SVD and MDS (part 2)'
+author: "Mik Black"
+date: "12/12/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Recap
+
+Last time we looked at three "different" methods for dimension reduction:
+
+ - Principal components analysis (PCA)
+ - Singular Value Decomposition (SVD)
+ - Multi-Dimensional Scaling (MDS)
+
+All of these methods are very similar in what they are trying to accomplish (representation of high-dimensional data in a reduced-dimensional space), and we saw that under certain conditions (mean-centred data for SVD, and Eulidean distance for MDS) all three methods produced the same results.
+
+### Dimension reduction techniques in genetics: 1000 Genomes Project 
+
+Previously in Study Group we have covered the use of SVD to create "metagenes" from gene expression data - a per-sample summary of the expression levels of a collection of genes.
+
+Today we'll look at the use of SVD to explore genetic ethnicity in large genome-wide genotyping studies, using the 
+1000 Genomes Project as our example.
+
+The data I'm using were put together by Tanya when we taught an afternoon computer lab as part of the Summer Institute in 
+Indigenous Genomics Aotearoa (SING-A).  We have 2504 individuals from the 1000 Genomes Project, with genotype data for 2302 ancestry-informative loci across the genome for each individual.
+
+```{r}
+load('snpData.RData')
+```
+
+```{r}
+dim(snpAns)
+head(snpAns[,1:6])
+```
+
+Have a look using the View command:
+
+```{r, eval=FALSE}
+View(snpAns)
+```
+
+Population data:
+
+```{r}
+table(snpAns$SubPopulation, snpAns$Population)
+```
+
+To examine population diversity, we need to do two things:
+
+1. create a data object of ONLY the SNP genotype data (i.e., remove the first three columns).
+2. convert the genotypes to allele counts (e.g., TT, AT, AA to 0, 1, 2 - count the number of A's).
+
+Step 1:
+```{r}
+## Create object containing only the SNP data - remove the first three columns
+snpAnsDat = snpAns[,-c(1,2,3)]
+```
+
+Step 2:
+```{r}
+## Function for creating 0,1,2 genotype data, with major allele homozygote as 0
+alleleCounts <- function(x){
+  gt <- names(table(x))
+  alleles <- unique(unlist(strsplit(gt,'')))
+  oo <- order(sapply(alleles,function(z) sum(grep(z,x))),decreasing=T)
+  alleles <- alleles[oo]
+  geno<-c(paste(alleles[1],alleles[1],collapse='',sep=''),
+          paste(sort(alleles),collapse='',sep=''),  
+          paste(alleles[2],alleles[2],collapse='',sep=''))
+  return(sapply(x,match,geno) - 1)
+}
+```
+
+```{r, cache=TRUE}
+## Apply the function to the genotype data, one column (SNP) at a time
+## This will take 30 seconds or so...
+snpAnsCount = apply(snpAnsDat, 2, alleleCounts)
+```
+
+Now we have a data set of just the SNP data, with genotypes converted to allele counts.
+
+```{r}
+head(snpAnsCount[,1:6])
+```
+
+Have a look at the new data set using the View command:
+
+```{r, eval=F}
+View(snpAnsCount)
+```
+
+So, what are we going to do with this new data set?
+
+### Dimension reduction
+
+In terms of examining population diversity, we have 2302 dimensions of data available - one dimension for each SNP.
+
+Rather than trying to comprehend this huge amount of data in 2302-dimensional space, genetics researchers often use Principal Components Analysis (PCA) to reduce the dimensionality of the data.
+
+The idea is to find the most important variation in the data, and examine the samples in terms of that variation, ignoring the rest.   In practice, this works fairly well, because genetic differences between populations provide a strong (and relatively consistent) source of variation across genomic loci (i.e., SNPs).  Rather than looking at 2302 dimensions of data, we end up looking at variation across just 2 or 3 dimensions - each dimension is defined by a combination of SNPs which vary in a similar way across the individuals in the study.
+
+Here is the function I used to use to do this in my GENE360 Population Genetic Diversity module.  It calculates the
+first three eigenvectors using PCA:
+
+```{r}
+pcaGenotypes <- function(x){
+  ## Calculate columns sample means (and divide by two)
+  sm<-colMeans(x/2)
+  
+  ## Divide allele counts by 2 (generate "frequencies")
+  ## and subtract off row-means 
+  gg <- t( t(x/2) - rowMeans(t(x/2)) ) / sqrt(sm*(1-sm))
+  
+  ## Create covariance matrix (from last session)
+  hh <- 1/ncol(x) * gg%*%t(gg)
+  
+  ## Perform eigenvector decomposition on covarience matrix
+  return(eigen(hh)$vectors[,1:3])
+}
+```
+
+Run it (but actually don't, because it takes ages) via:
+
+```{r, eval=FALSE}
+evecPCA = pcaGenotypes(snpAnsCount)
+```
+
+The following command runs the code, but also times it to see how long it takes:
+
+```{r, cache=TRUE}
+system.time(evecPCA <- pcaGenotypes(snpAnsCount))
+```
+
+A quicker way to perform dimension reduction is via the `rsvd` package, which uses an approximation to compute the 
+"low-rank SVD" (i.e., just the first few PCs) of a rectangular matrix.
+
+_Note that you need to transpose the data matrix prior to performing SVD):_
+
+```{r, cache=TRUE}
+library(rsvd)
+sm <- colMeans( snpAnsCount / 2 )  
+gg <- t(t(snpAnsCount/2) - rowMeans(t(snpAnsCount/2))) / sqrt(sm*(1-sm))
+
+system.time(evecRSVD <- rsvd( t(gg), k=3))
+```
+
+Much faster...
+
+Compare the first three eigenvectors generated by `rvsd` to those from PCA:
+
+```{r, fig.width=15, fig.height=5, cache=TRUE}
+par(mfrow=c(1,3))
+for(i in 1:3) plot(evecRSVD$v[,i], evecPCA[,i])
+```
+
+First couple are pretty good, but PC3 is looking a bit fuzzy.
+
+The more eignevectors get calculated, the better the approximation for the first few:
+
+```{r, fig.width=15, fig.height=5, cache=TRUE}
+## 5 dimensions
+evecRSVD <- rsvd( t(gg), k=5)
+par(mfrow=c(1,3))
+for(i in 1:3) plot(evecRSVD$v[,i], evecPCA[,i])
+```
+
+```{r, fig.width=15, fig.height=5, cache=TRUE}
+## 50 dimensions
+evecRSVD <- rsvd( t(gg), k=50)
+par(mfrow=c(1,3))
+for(i in 1:3) plot(evecRSVD$v[,i], evecPCA[,i])
+```
+
+```{r, fig.width=15, fig.height=5, cache=TRUE}
+## 100 dimensions
+evecRSVD <- rsvd( t(gg), k=100)
+par(mfrow=c(1,3))
+for(i in 1:3) plot(evecRSVD$v[,i], evecPCA[,i])
+```
+
+Here's what a scatterplot of the first two PC's looks like.
+
+Merriman lab - look familiar...???
+
+```{r, fig.width=8, fig.height=8}
+plot(evecRSVD$v[,1], evecRSVD$v[,2], xlab="PC1", ylab="PC2")
+```
+
+Need to add some colour:
+
+```{r}
+## Create an object relating to the population data
+ansPop = snpAns$Population
+
+## Generate colours to associate with each population
+pCols = c("brown","red","purple","blue","green")
+names(pCols) <- c("AFR", "AMR", "EAS", "EUR", "SAS")
+
+popCol = pCols[as.numeric(as.factor(ansPop))]
+names(popCol) = ansPop
+
+## Check that they correspond to populations
+table(popCol, ansPop)
+```
+
+Re-plot first two eigenvectors, and add population colours.
+
+```{r, fig.width=8, fig.height=8}
+plot(evecRSVD$v[,1], evecRSVD$v[,2], col=popCol, xlab="PC1", ylab="PC2", pch=16, cex=0.5)
+legend('topright', c("AFR", "AMR", "EAS", "EUR", "SAS"), fill=c("brown","red","purple","blue","green"))
+```
+
+Plot each of the first three eignevectors against each other
+
+```{r, fig.width=12, fig.height=12}
+par(mfrow=c(2,2))
+plot(evecRSVD$v[,1], evecRSVD$v[,2], col=popCol, xlab="PC1", ylab="PC2", pch=16, cex=0.5)
+legend('topright', c("AFR", "AMR", "EAS", "EUR", "SAS"), fill=c("brown","red","purple","blue","green"))
+
+plot(evecRSVD$v[,1], evecRSVD$v[,3], col=popCol, xlab="PC1", ylab="PC3", pch=16, cex=0.5)
+legend('topright', c("AFR", "AMR", "EAS", "EUR", "SAS"), fill=c("brown","red","purple","blue","green"))
+
+plot(evecRSVD$v[,2], evecRSVD$v[,3], col=popCol, xlab="PC2", ylab="PC3", pch=16, cex=0.5)
+legend('topright', c("AFR", "AMR", "EAS", "EUR", "SAS"), fill=c("brown","red","purple","blue","green"))
+```
+
+From the plots we can see that samples from the same population tend to cluster together, and that the first three principal components do a reasonable job of capturing the genetic diversity between the populations.
+
+With the `scatterplot3d` package, you can plot the first three principal
+components at once (i.e., combining the information from the three
+scatterplots above).  This shows that the European (EUR), East Asian (EAS) and 
+South Asian (SAS) super-populations are relatively homogeneous, while the Ad-Mixed American (AMR) and African (AFR) super-populations exhibit greater variation, suggesting admixture within these groups.
+
+```{r, fig.height=6.5, fig.width=6.5}
+library(scatterplot3d)
+scatterplot3d(evecRSVD$v[,1], evecRSVD$v[,2], evecRSVD$v[,3], color=popCol, pch=16,
+              cex.symbols=0.5, xlab="PC1", ylab="PC2", zlab="PC3")
+```
+
+### Gloabl vs local genotype similarity
+
+The PCA/SVD approach calculates principal components which summarize genotype variation, at the whole-genome level.  This means that the positioning on an individual on the scatterplot relates to their genome-wide genotype data, and their proximity to other individuals reflects similarity at the genome-wide scale.  This type of similarity measure could be considreed a "global" assessment of genotype variation.
+
+It is also possible to consider "local" genotype similarity, at multiple regions of the genome.  The speed of `rsvd`
+means that we easily can define subsets of SNPs (e.g., a specific region of a chromosome), and perform the analysis multiple times as we move across the genome.  This may lead to changes in how the scatterplot looks, as a result of differing genetic ancestry (and thus differing similarity) in different regions of the genome.
+
+To perform any sort of "local" analysis, first need to obtain SNP locations.
+
+```{r, message=FALSE, error=FALSE, warning=FALSE}
+library(dplyr)
+library(magrittr)
+library(SNPlocs.Hsapiens.dbSNP144.GRCh37)
+```
+
+Extract location information from the `SNPlocs.Hsapiens.dbSNP144.GRCh37` package:
+
+```{r, cache=TRUE}
+snps <- SNPlocs.Hsapiens.dbSNP144.GRCh37
+snpLoc <- snpid2loc(snps,colnames(snpAnsDat))
+```
+
+```{r}
+head(snpLoc)
+```
+
+How many SNPs per chromosome?
+
+```{r}
+table(names(snpLoc))
+```
+
+Calculate chromosome region covered, number of SNPs, and average inter-SNP distance.
+
+```{r}
+chrs <- names(table(names(snpLoc)))[c(1,12,16:22,2:11,13:15)]
+data.frame(Chr = chrs,
+           SNPs = unlist(lapply(chrs, function(x) sum(names(snpLoc)==x))),
+           MinPos = unlist(lapply(chrs, function(x) min(snpLoc[which(names(snpLoc)==x)]))),
+           MaxPos = unlist(lapply(chrs, function(x) max(snpLoc[which(names(snpLoc)==x)])))) %>% 
+  mutate(Density=(MaxPos-MinPos)/SNPs)
+```
+
+Rewrite the pcaGenotypes function from above using the `rsvd` function:
+
+```{r, cache=TRUE}
+fastPcaGenotypes <- function(x, numComp){
+  sm<-colMeans(x/2)
+  gg <- t(t(x/2) - rowMeans(t(x/2))) / sqrt(sm*(1-sm))
+  return(rsvd(t(gg), k=numComp)$v[,1:numComp])
+}
+```
+
+Perform PCA per chromosome:
+
+```{r, cache=TRUE}
+pcaChr <- list()
+for(i in 1:22){
+    pcaChr[[i]] = fastPcaGenotypes(snpAnsCount[,names(snpLoc)==paste0("ch",i)], 5)
+}
+```
+
+```{r, eval=TRUE, echo=FALSE, cache=TRUE}
+## Flip eignvector 2 for chrom 21
+# pcaChr[[13]][,2] <- -pcaChr[[13]][,2]
+pcaChr[[21]][,2] <- -pcaChr[[21]][,2]
+```
+
+Pick out an interesting individual (trust me on this one):
+
+```{r}
+indiv <- which(ansPop=="AMR")[36]
+indiv
+```
+
+For each chromosome, plot the first two principal components, and colour the populations in the same way 
+we did above.  For individual `r indiv` plot their location in PC1/PC2 space in black, per chromosome.
+
+```{r, fig.width=12, fig.height=21, cache=TRUE}
+par(mfrow=c(6,4))
+plot(0, 0, col="white", xlim=c(0,1), ylim=c(0,1), axes=FALSE, xlab='', ylab='')
+legend(0.1, 0.95, fill=pCols, names(pCols), cex=2)
+
+for(i in 1:22){
+  plot(pcaChr[[i]][,1], pcaChr[[i]][,2], pch=20, cex=0.3,
+                    col=popCol, xlab="PC 1", ylab="PC 2", main=paste("Chr",i)) 
+  points(pcaChr[[i]][indiv,1], pcaChr[[i]][indiv,2], pch=16, cex=2, col="black")
+}
+```
+
+### Summary
+
+ - `rsvd` makes it possible to extract the first few PCs relatively quickly from genome-wide genotype data.
+ - "Movement" of inividual `r indiv` around PC1/PC2 space across chromosomes reflects admixture, and suggests the possible ancestral group for each chromosome (maybe).
+ - With higher resolution data (i.e., greater SNP density) it would be possible to perform a "sliding PCA" across the genome, effectively determining the ancestral original of chromosomal regions for each individual.
+ 
+ 
