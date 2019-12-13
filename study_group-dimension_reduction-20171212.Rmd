@@ -2,7 +2,7 @@
 title: 'Otago Study Group: PCA, SVD and MDS (part 2)'
 author: "Mik Black"
 date: "12/12/2017"
-output: html_document
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
@@ -261,7 +261,7 @@ Extract location information from the `SNPlocs.Hsapiens.dbSNP144.GRCh37` package
 
 ```{r, cache=TRUE}
 snps <- SNPlocs.Hsapiens.dbSNP144.GRCh37
-snpLoc <- snpid2loc(snps,colnames(snpAnsDat))
+snpLoc <- snpsById(snps,colnames(snpAnsDat))
 ```
 
 ```{r}
@@ -271,17 +271,19 @@ head(snpLoc)
 How many SNPs per chromosome?
 
 ```{r}
-table(names(snpLoc))
+table(seqnames(snpLoc))
 ```
 
 Calculate chromosome region covered, number of SNPs, and average inter-SNP distance.
 
 ```{r}
-chrs <- names(table(names(snpLoc)))[c(1,12,16:22,2:11,13:15)]
+chrs <- names(table(seqnames(snpLoc)))[c(1,12,16:22,2:11,13:15)]
 data.frame(Chr = chrs,
-           SNPs = unlist(lapply(chrs, function(x) sum(names(snpLoc)==x))),
-           MinPos = unlist(lapply(chrs, function(x) min(snpLoc[which(names(snpLoc)==x)]))),
-           MaxPos = unlist(lapply(chrs, function(x) max(snpLoc[which(names(snpLoc)==x)])))) %>% 
+           SNPs = unlist(lapply(chrs, function(x) sum(as.vector(seqnames(snpLoc))==x))),
+           MinPos = unlist(lapply(chrs, 
+                                  function(x) min(pos(snpLoc)[which(as.vector(seqnames(snpLoc))==x)]))),
+           MaxPos = unlist(lapply(chrs, 
+                                  function(x) max(pos(snpLoc)[which(as.vector(seqnames(snpLoc))==x)])))) %>% 
   mutate(Density=(MaxPos-MinPos)/SNPs)
 ```
 
@@ -300,7 +302,7 @@ Perform PCA per chromosome:
 ```{r, cache=TRUE}
 pcaChr <- list()
 for(i in 1:22){
-    pcaChr[[i]] = fastPcaGenotypes(snpAnsCount[,names(snpLoc)==paste0("ch",i)], 5)
+    pcaChr[[i]] = fastPcaGenotypes(snpAnsCount[,as.vector(seqnames(snpLoc))==i], 5)
 }
 ```
 
